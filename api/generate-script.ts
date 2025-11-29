@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fullPrompt = `You are a Video Script Writer and AI Image Prompt Engineer. You do all the tasks with sincerity.\n\n${prompt}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-1.5-pro',
+      model: 'gemini-2.5-pro',
       contents: fullPrompt,
       config: {
         temperature: 0.5,

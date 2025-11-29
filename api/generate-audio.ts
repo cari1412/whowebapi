@@ -22,26 +22,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing text' });
     }
 
-    // Вызываем ElevenLabs API
-    const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/Jessica', {
-      method: 'POST',
-      headers: {
-        'Accept': 'audio/mpeg',
-        'Content-Type': 'application/json',
-        'xi-api-key': process.env.ELEVENLABS_API_KEY!,
-      },
-      body: JSON.stringify({
-        text: text,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.5,
-        }
-      })
-    });
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      throw new Error('ELEVENLABS_API_KEY not configured');
+    }
+
+    // ✅ Используем правильный voice ID (Rachel)
+    const voiceId = '21m00Tcm4TlvDq8ikWAM'; // Rachel voice
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, // ✅ Убрал 'Jessica'
+      {
+        method: 'POST',
+        headers: {
+          'Accept': 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          text: text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.5,
+          }
+        })
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`ElevenLabs API error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
     }
 
     // Возвращаем аудио как base64

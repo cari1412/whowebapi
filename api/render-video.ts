@@ -24,14 +24,20 @@ function decodeDataUrl(dataUrl: string): Buffer {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS
+  // CORS - КРИТИЧЕСКИ ВАЖНО!
+  const origin = req.headers.origin || '*';
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Origin', origin); // Разрешаем origin запроса
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-Requested-With, Content-Type, Accept, Authorization'
+  );
 
+  // Обработка preflight запроса
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== 'POST') {
@@ -60,11 +66,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const audioPath = join(tempDir, 'audio.mp3');
     
     if (isDataUrl(audioUrl)) {
-      // Декодируем data URL
       const audioBuffer = decodeDataUrl(audioUrl);
       await writeFile(audioPath, audioBuffer);
     } else {
-      // Скачиваем по URL
       const audioResponse = await fetch(audioUrl);
       if (!audioResponse.ok) {
         throw new Error(`Failed to download audio: ${audioResponse.status}`);
@@ -82,11 +86,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       try {
         if (isDataUrl(images[i])) {
-          // Декодируем data URL
           const imageBuffer = decodeDataUrl(images[i]);
           await writeFile(imagePath, imageBuffer);
         } else {
-          // Скачиваем по URL
           const imageResponse = await fetch(images[i]);
           if (!imageResponse.ok) {
             console.error(`Failed to download image ${i}: ${imageResponse.status}`);
@@ -114,7 +116,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let filelistContent = '';
     
     for (let i = 0; i < imagePaths.length; i++) {
-      // Использовать абсолютные пути с правильными слешами
       const normalizedPath = imagePaths[i].replace(/\\/g, '/');
       filelistContent += `file '${normalizedPath}'\n`;
       filelistContent += `duration ${imageDuration.toFixed(3)}\n`;
@@ -200,17 +201,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error(`[${sessionId}] Render error:`, error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Попытаться очистить временные файлы даже при ошибке
-    try {
-      if (existsSync(tempDir)) {
-        // Cleanup...
-      }
-    } catch {}
-
     return res.status(500).json({ error: errorMessage });
   }
 }
 
 export const config = {
-  maxDuration: 300, // 5 минут (требует Pro план для > 10 секунд)
+  maxDuration: 300, // 5 минут (требует Pro план)
 };

@@ -10,6 +10,19 @@ import { v4 as uuidv4 } from 'uuid';
 // Установить путь к FFmpeg
 ffmpeg.setFfmpegPath(ffmpegPath.path);
 
+// Утилита для определения и декодирования data URLs
+function isDataUrl(url: string): boolean {
+  return url.startsWith('data:');
+}
+
+function decodeDataUrl(dataUrl: string): Buffer {
+  const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!matches) {
+    throw new Error('Invalid data URL format');
+  }
+  return Buffer.from(matches[2], 'base64');
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // CORS
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -42,39 +55,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await mkdir(tempDir, { recursive: true });
     }
 
-    // Скачать аудио
-    console.log(`[${sessionId}] Downloading audio...`);
+    // Скачать/декодировать аудио
+    console.log(`[${sessionId}] Processing audio...`);
     const audioPath = join(tempDir, 'audio.mp3');
-    const audioResponse = await fetch(audioUrl);
-    if (!audioResponse.ok) {
-      throw new Error(`Failed to download audio: ${audioResponse.status}`);
+    
+    if (isDataUrl(audioUrl)) {
+      // Декодируем data URL
+      const audioBuffer = decodeDataUrl(audioUrl);
+      await writeFile(audioPath, audioBuffer);
+    } else {
+      // Скачиваем по URL
+      const audioResponse = await fetch(audioUrl);
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download audio: ${audioResponse.status}`);
+      }
+      const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
+      await writeFile(audioPath, audioBuffer);
     }
-    const audioBuffer = Buffer.from(await audioResponse.arrayBuffer());
-    await writeFile(audioPath, audioBuffer);
 
-    // Скачать изображения
-    console.log(`[${sessionId}] Downloading ${images.length} images...`);
+    // Скачать/декодировать изображения
+    console.log(`[${sessionId}] Processing ${images.length} images...`);
     const imagePaths: string[] = [];
     
     for (let i = 0; i < images.length; i++) {
       const imagePath = join(tempDir, `image_${String(i).padStart(3, '0')}.png`);
-      const imageResponse = await fetch(images[i]);
       
-      if (!imageResponse.ok) {
-        console.error(`Failed to download image ${i}: ${imageResponse.status}`);
+      try {
+        if (isDataUrl(images[i])) {
+          // Декодируем data URL
+          const imageBuffer = decodeDataUrl(images[i]);
+          await writeFile(imagePath, imageBuffer);
+        } else {
+          // Скачиваем по URL
+          const imageResponse = await fetch(images[i]);
+          if (!imageResponse.ok) {
+            console.error(`Failed to download image ${i}: ${imageResponse.status}`);
+            continue;
+          }
+          const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+          await writeFile(imagePath, imageBuffer);
+        }
+        imagePaths.push(imagePath);
+      } catch (error) {
+        console.error(`Error processing image ${i}:`, error);
         continue;
       }
-      
-      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-      await writeFile(imagePath, imageBuffer);
-      imagePaths.push(imagePath);
     }
 
     if (imagePaths.length === 0) {
-      throw new Error('No images were downloaded successfully');
+      throw new Error('No images were processed successfully');
     }
 
-    console.log(`[${sessionId}] Downloaded ${imagePaths.length} images successfully`);
+    console.log(`[${sessionId}] Processed ${imagePaths.length} images successfully`);
 
     // Создать concat файл для FFmpeg
     const filelistPath = join(tempDir, 'filelist.txt');
@@ -85,14 +117,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Использовать абсолютные пути с правильными слешами
       const normalizedPath = imagePaths[i].replace(/\\/g, '/');
       filelistContent += `file '${normalizedPath}'\n`;
-      filelistContent += `duration ${imageDuration.toFixed(2)}\n`;
+      filelistContent += `duration ${imageDuration.toFixed(3)}\n`;
     }
     // Добавить последнее изображение еще раз
     const lastImagePath = imagePaths[imagePaths.length - 1].replace(/\\/g, '/');
     filelistContent += `file '${lastImagePath}'\n`;
     
     await writeFile(filelistPath, filelistContent);
-    console.log(`[${sessionId}] Created concat file`);
+    console.log(`[${sessionId}] Created concat file with ${imagePaths.length} images, ${imageDuration.toFixed(2)}s each`);
 
     // Путь к выходному файлу
     const outputPath = join(tempDir, 'output.mp4');
@@ -107,12 +139,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .input(audioPath)
         .outputOptions([
           '-c:v', 'libx264',
+          '-preset', 'medium',
           '-tune', 'stillimage',
           '-c:a', 'aac',
           '-b:a', '192k',
           '-pix_fmt', 'yuv420p',
+          '-vf', 'scale=1280:1080:force_original_aspect_ratio=decrease,pad=1280:1080:(ow-iw)/2:(oh-ih)/2',
           '-shortest',
-          '-movflags', '+faststart', // Для лучшей совместимости
+          '-movflags', '+faststart',
         ])
         .output(outputPath)
         .on('start', (commandLine) => {
@@ -169,8 +203,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Попытаться очистить временные файлы даже при ошибке
     try {
       if (existsSync(tempDir)) {
-        const files = await readFile(tempDir).catch(() => []);
-        // Очистка...
+        // Cleanup...
       }
     } catch {}
 
